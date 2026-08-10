@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<library path="mecanum_serial_hardware">
+  <class
+    name="mecanum_serial_hardware/MecanumSerialHardware"
+    type="mecanum_serial_hardware::MecanumSerialHardware"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Four-wheel mecanum serial hardware interface for Arduino UNO.
+    </description>
+  </class>
+</library>
