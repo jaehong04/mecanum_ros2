@@ -76,3 +76,42 @@ source /opt/ros/humble/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
 source install/setup.bash
+```
+
+## Run
+
+```bash
+cd ~/mecanum_ros2_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 launch mecanum_bringup mecanum_bringup.launch.py
+```
+
+## Controller Check
+
+```bash
+ros2 control list_controllers
+```
+
+Expected:
+
+```text
+joint_state_broadcaster     active
+mecanum_drive_controller    active
+```
+
+## Baseline Version
+
+### v1.0-rpi-working
+
+Raspberry Pi 4에서 다음 기능이 정상 동작한 기준 버전이다.
+
+- ROS2 Mecanum Control
+- Arduino Serial Communication
+- Encoder Feedback
+- Odometry
+- IMU Yaw
+- Forward / Backward
+- Left / Right Mecanum Motion
+- Left / Right 90 degree Rotation
