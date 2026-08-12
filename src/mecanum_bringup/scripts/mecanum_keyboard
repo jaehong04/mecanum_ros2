@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Keyboard teleoperation for the mecanum drive controller."""
+
+import select
+import signal
+import sys
+import termios
+import threading
+import tty
+
+import rclpy
+from geometry_msgs.msg import Twist
+
+
+HELP = """
+Mecanum keyboard (body frame)
+ q  w  e     forward-left / forward / forward-right
+ a  s  d     left         / STOP    / right
+ z  x  c     back-left    / back    / back-right
+ r / f       rotate counter-clockwise / clockwise in place
+ t / y       forward curve left / right
+ g / h       left/right strafe while turning
+ v / b       reverse curve left / right
+ + / -       increase / decrease speed (space also stops)
+ Ctrl-C      stop and exit
+"""
+
+MOTION = {
+    "q": (1.0, 1.0, 0.0), "w": (1.0, 0.0, 0.0), "e": (1.0, -1.0, 0.0),
+    "a": (0.0, 1.0, 0.0), "s": (0.0, 0.0, 0.0), "d": (0.0, -1.0, 0.0),
+    "z": (-1.0, 1.0, 0.0), "x": (-1.0, 0.0, 0.0), "c": (-1.0, -1.0, 0.0),
+    "r": (0.0, 0.0, 1.0), "f": (0.0, 0.0, -1.0),
+    "t": (1.0, 0.0, 0.55), "y": (1.0, 0.0, -0.55),
+    "g": (0.0, 1.0, -0.55), "h": (0.0, -1.0, 0.55),
+    "v": (-1.0, 0.0, -0.55), "b": (-1.0, 0.0, 0.55),
+    " ": (0.0, 0.0, 0.0),
+}
+
+
+class KeyboardTeleop:
+    def __init__(self):
+        self.node = rclpy.create_node("mecanum_keyboard")
+        self.publisher = self.node.create_publisher(
+            Twist, "/mecanum_drive_controller/reference_unstamped", 10)
+        self.linear_speed = 0.12
+        self.angular_speed = 0.7
+        self.command = (0.0, 0.0, 0.0)
+        self.running = True
+        self.terminal = None
+        self.old_settings = None
+        self.timer = self.node.create_timer(0.05, self.publish)
+
+    def publish(self):
+        msg = Twist()
+        msg.linear.x = self.command[0] * self.linear_speed
+        msg.linear.y = self.command[1] * self.linear_speed
+        msg.angular.z = self.command[2] * self.angular_speed
+        self.publisher.publish(msg)
+
+    def open_terminal(self):
+        try:
+            self.terminal = open("/dev/tty", "r", encoding="utf-8", buffering=1)
+        except OSError:
+            self.terminal = sys.stdin
+        if not self.terminal.isatty():
+            raise RuntimeError("keyboard input needs an interactive terminal")
+        self.old_settings = termios.tcgetattr(self.terminal)
+        tty.setcbreak(self.terminal.fileno())
+
+    def keyboard_loop(self):
+        print(HELP, flush=True)
+        try:
+            self.open_terminal()
+            while self.running and rclpy.ok():
+                readable, _, _ = select.select([self.terminal], [], [], 0.1)
+                if not readable:
+                    continue
+                key = self.terminal.read(1)
+                if key == "\x03":
+                    break
+                if key in MOTION:
+                    self.command = MOTION[key]
+                elif key in ("+", "="):
+                    self.linear_speed = min(0.5, self.linear_speed * 1.1)
+                    self.angular_speed = min(2.5, self.angular_speed * 1.1)
+                    print(f"speed: {self.linear_speed:.2f} m/s, {self.angular_speed:.2f} rad/s")
+                elif key in ("-", "_"):
+                    self.linear_speed = max(0.03, self.linear_speed * 0.9)
+                    self.angular_speed = max(0.15, self.angular_speed * 0.9)
+                    print(f"speed: {self.linear_speed:.2f} m/s, {self.angular_speed:.2f} rad/s")
+        finally:
+            self.command = (0.0, 0.0, 0.0)
+            for _ in range(3):
+                self.publish()
+            self.running = False
+
+    def close(self):
+        if self.old_settings is not None:
+            termios.tcsetattr(self.terminal, termios.TCSADRAIN, self.old_settings)
+        if self.terminal not in (None, sys.stdin):
+            self.terminal.close()
+        self.node.destroy_node()
+
+
+def restore_terminal(teleop):
+    """Restore terminal settings even when launch sends SIGTERM/SIGHUP."""
+    if teleop.old_settings is not None and teleop.terminal is not None:
+        termios.tcsetattr(teleop.terminal, termios.TCSANOW, teleop.old_settings)
+
+
+def request_stop(teleop, _signum, _frame):
+    teleop.command = (0.0, 0.0, 0.0)
+    teleop.publish()
+    restore_terminal(teleop)
+    teleop.running = False
+
+
+def main():
+    rclpy.init()
+    teleop = KeyboardTeleop()
+    signal.signal(signal.SIGTERM, lambda signum, frame: request_stop(teleop, signum, frame))
+    signal.signal(signal.SIGHUP, lambda signum, frame: request_stop(teleop, signum, frame))
+    thread = threading.Thread(target=teleop.keyboard_loop, daemon=True)
+    thread.start()
+    try:
+        while rclpy.ok() and teleop.running:
+            rclpy.spin_once(teleop.node, timeout_sec=0.1)
+    except KeyboardInterrupt:
+        teleop.running = False
+    finally:
+        teleop.command = (0.0, 0.0, 0.0)
+        teleop.publish()
+        restore_terminal(teleop)
+        teleop.close()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

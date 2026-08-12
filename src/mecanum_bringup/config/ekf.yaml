@@ -1,0 +1,107 @@
+ekf_filter_node:
+  ros__parameters:
+    frequency: 50.0
+    sensor_timeout: 0.2
+
+    two_d_mode: true
+
+    publish_tf: true
+    publish_acceleration: false
+    print_diagnostics: true
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+
+    # ============================================================
+    # Wheel Odometry
+    #
+    # 사용:
+    #   vx
+    #   vy
+    #   vyaw
+    #
+    # Pose(x, y, yaw)는 wheel velocity에서 이미 적분되어 생성되므로
+    # 중복 융합하지 않는다.
+    # ============================================================
+
+    odom0: /mecanum_drive_controller/odometry
+
+    odom0_config: [
+      false, false, false,
+      false, false, false,
+      true,  true,  false,
+      false, false, true,
+      false, false, false
+    ]
+
+    odom0_queue_size: 10
+
+
+    # ============================================================
+    # WitMotion IMU
+    #
+    # 현재 장착 환경에서는 센서 내부 absolute Yaw가
+    # 실제 회전각과 크게 차이나는 현상이 확인됨.
+    #
+    # 따라서:
+    #
+    #   orientation yaw       → 사용 안 함
+    #   angular_velocity.z    → 사용
+    #
+    # 즉 Gyro Z만 EKF에 융합한다.
+    # ============================================================
+
+    imu0: /imu/data
+
+    imu0_config: [
+      false, false, false,
+      false, false, false,
+      false, false, false,
+      false, false, true,
+      false, false, false
+    ]
+
+    imu0_queue_size: 20
+
+    # orientation을 사용하지 않으므로 상대 orientation 처리 불필요
+    imu0_differential: false
+    imu0_relative: false
+
+    # linear acceleration을 융합하지 않으므로 중력 제거 불필요
+    imu0_remove_gravitational_acceleration: false
+
+
+    # ============================================================
+    # Process Noise Covariance
+    # State order:
+    #
+    # x, y, z,
+    # roll, pitch, yaw,
+    # vx, vy, vz,
+    # vroll, vpitch, vyaw,
+    # ax, ay, az
+    # ============================================================
+
+    process_noise_covariance: [
+      0.05, 0.0,  0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0,  0.05, 0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0,  0.0,  0.06, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+
+      0.0,  0.0,  0.0,  0.03, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0,  0.0,  0.0,  0.0, 0.03, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0,  0.0,  0.0,  0.0, 0.0, 0.06, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+
+      0.0,  0.0,  0.0,  0.0, 0.0, 0.0, 0.025, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0,  0.0,  0.0,  0.0, 0.0, 0.0, 0.0, 0.025, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0,  0.0,  0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+
+      0.0,  0.0,  0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.0,  0.0,  0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.0,
+      0.0,  0.0,  0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.03, 0.0, 0.0, 0.0,
+
+      0.0,  0.0,  0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.0, 0.0,
+      0.0,  0.0,  0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.0,
+      0.0,  0.0,  0.0,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04
+    ]

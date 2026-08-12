@@ -19,3 +19,10 @@ __pycache__/
 
 # OS temporary files
 .DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local backup files
+*.backup

@@ -2,6 +2,8 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro"
        name="mecanum_robot">
 
+  <xacro:arg name="serial_port" default="/dev/ttyUSB0"/>
+
   <!-- 실제 측정값 -->
   <xacro:property name="wheel_radius" value="0.04"/>
   <xacro:property name="half_wheelbase" value="0.095"/>
@@ -10,12 +12,35 @@
   <!-- 시각화용 값 -->
   <xacro:property name="wheel_width" value="0.04"/>
 
+  <material name="body_blue">
+    <color rgba="0.05 0.32 0.75 1.0"/>
+  </material>
+  <material name="wheel_dark">
+    <color rgba="0.04 0.04 0.04 1.0"/>
+  </material>
+  <material name="encoder_marker">
+    <color rgba="1.0 0.55 0.0 1.0"/>
+  </material>
+  <material name="front_marker">
+    <color rgba="0.9 0.08 0.08 1.0"/>
+  </material>
+
   <link name="base_link">
     <visual>
       <origin xyz="0 0 0.06" rpy="0 0 0"/>
       <geometry>
         <box size="0.25 0.20 0.08"/>
       </geometry>
+      <material name="body_blue"/>
+    </visual>
+
+    <!-- Red front marker makes chassis direction obvious in RViz. -->
+    <visual>
+      <origin xyz="0.105 0 0.105" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.045 0.10 0.012"/>
+      </geometry>
+      <material name="front_marker"/>
     </visual>
 
     <collision>
@@ -35,6 +60,19 @@
     </inertial>
   </link>
 
+  <link name="imu_link">
+    <visual>
+      <geometry><box size="0.035 0.025 0.008"/></geometry>
+      <material name="encoder_marker"/>
+    </visual>
+  </link>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <!-- Change xyz/rpy to the measured IMU mounting pose. -->
+    <origin xyz="0 0 0.115" rpy="0 0 0"/>
+  </joint>
+
   <xacro:macro name="wheel" params="prefix x y">
     <link name="${prefix}_wheel_link">
       <visual>
@@ -42,6 +80,16 @@
         <geometry>
           <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
         </geometry>
+        <material name="wheel_dark"/>
+      </visual>
+
+      <!-- An asymmetric spoke makes encoder-driven joint rotation visible. -->
+      <visual>
+        <origin xyz="${wheel_radius * 0.48} 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${wheel_radius * 0.9} ${wheel_width * 1.08} 0.007"/>
+        </geometry>
+        <material name="encoder_marker"/>
       </visual>
 
       <collision>
@@ -92,7 +140,7 @@
     <hardware>
       <plugin>mecanum_serial_hardware/MecanumSerialHardware</plugin>
 
-      <param name="port">/dev/ttyUSB0</param>
+      <param name="port">$(arg serial_port)</param>
       <param name="baud_rate">115200</param>
     </hardware>
 
@@ -100,21 +148,25 @@
 
     <joint name="front_left_wheel_joint">
       <command_interface name="velocity"/>
+      <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
 
     <joint name="front_right_wheel_joint">
       <command_interface name="velocity"/>
+      <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
 
     <joint name="rear_left_wheel_joint">
       <command_interface name="velocity"/>
+      <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
 
     <joint name="rear_right_wheel_joint">
       <command_interface name="velocity"/>
+      <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
   </ros2_control>

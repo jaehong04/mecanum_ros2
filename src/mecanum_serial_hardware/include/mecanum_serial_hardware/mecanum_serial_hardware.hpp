@@ -59,9 +59,12 @@ private:
   std::string port_{"/dev/ttyUSB0"};
   int baud_rate_{115200};
   std::string receive_buffer_;
+  bool run_announced_{false};
+  unsigned int startup_stop_cycles_{0};
 
   // 순서: FL, FR, RL, RR
   std::array<double, 4> velocity_commands_{{0.0, 0.0, 0.0, 0.0}};
+  std::array<double, 4> position_states_{{0.0, 0.0, 0.0, 0.0}};
   std::array<double, 4> velocity_states_{{0.0, 0.0, 0.0, 0.0}};
 };
 
