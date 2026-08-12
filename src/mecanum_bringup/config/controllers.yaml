@@ -33,7 +33,8 @@ mecanum_drive_controller:
 
     base_frame_id: base_link
     odom_frame_id: odom
-    enable_odom_tf: true
+    # robot_localization owns odom -> base_link after wheel/IMU fusion.
+    enable_odom_tf: false
 
     pose_covariance_diagonal:
       - 0.1

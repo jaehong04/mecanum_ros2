@@ -8,7 +8,16 @@ install(
     launch
     config
     urdf
+    rviz
   DESTINATION share/${PROJECT_NAME}
+)
+
+install(FILES README.md DESTINATION share/${PROJECT_NAME})
+
+install(PROGRAMS
+  scripts/mecanum_keyboard
+  scripts/witmotion_ble_imu
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()

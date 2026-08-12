@@ -4,7 +4,7 @@ import struct
 import time
 import serial
 
-PORT = "/dev/ttyUSB1"
+PORT = "/dev/ttyUSB0"
 BAUD = 115200
 ANGLE_SCALE = 180.0 / 32768.0
 TEST_TIME = 60.0

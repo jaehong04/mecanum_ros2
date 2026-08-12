@@ -3,7 +3,7 @@
 import struct
 import serial
 
-PORT = "/dev/ttyUSB1"
+PORT = "/dev/ttyUSB0"
 BAUD = 115200
 
 ACC_SCALE = 16.0 / 32768.0

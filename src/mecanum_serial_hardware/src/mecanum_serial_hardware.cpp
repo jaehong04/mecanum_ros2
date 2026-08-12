@@ -67,6 +67,7 @@ hardware_interface::CallbackReturn MecanumSerialHardware::on_init(
     }
 
     bool has_velocity_state = false;
+    bool has_position_state = false;
 
     for (const auto & state_interface : joint.state_interfaces)
     {
@@ -74,13 +75,17 @@ hardware_interface::CallbackReturn MecanumSerialHardware::on_init(
       {
         has_velocity_state = true;
       }
+      else if (state_interface.name == hardware_interface::HW_IF_POSITION)
+      {
+        has_position_state = true;
+      }
     }
 
-    if (!has_velocity_state)
+    if (!has_velocity_state || !has_position_state)
     {
       RCLCPP_ERROR(
         rclcpp::get_logger("MecanumSerialHardware"),
-        "Joint %s must have a velocity state interface.",
+        "Joint %s must have position and velocity state interfaces.",
         joint.name.c_str());
       return hardware_interface::CallbackReturn::ERROR;
     }
@@ -112,18 +117,18 @@ hardware_interface::CallbackReturn MecanumSerialHardware::on_activate(
   const rclcpp_lifecycle::State &)
 {
   velocity_commands_.fill(0.0);
+  position_states_.fill(0.0);
   velocity_states_.fill(0.0);
   receive_buffer_.clear();
+  run_announced_ = false;
+  // Opening an Arduino serial port can reset its MCU. Hold STOP for two
+  // seconds so no boot-time/default motor command can move the robot.
+  startup_stop_cycles_ = 100;
 
   if (!send_line("S\n"))
   {
     return hardware_interface::CallbackReturn::ERROR;
   }
-
-  RCLCPP_INFO(
-    rclcpp::get_logger("MecanumSerialHardware"),
-    "Serial hardware activated on %s.",
-    port_.c_str());
 
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -144,6 +149,10 @@ MecanumSerialHardware::export_state_interfaces()
 
   for (std::size_t i = 0; i < info_.joints.size(); ++i)
   {
+    interfaces.emplace_back(
+      info_.joints[i].name,
+      hardware_interface::HW_IF_POSITION,
+      &position_states_[i]);
     interfaces.emplace_back(
       info_.joints[i].name,
       hardware_interface::HW_IF_VELOCITY,
@@ -171,7 +180,7 @@ MecanumSerialHardware::export_command_interfaces()
 
 hardware_interface::return_type MecanumSerialHardware::read(
   const rclcpp::Time &,
-  const rclcpp::Duration &)
+  const rclcpp::Duration & period)
 {
   if (serial_fd_ < 0)
   {
@@ -203,6 +212,17 @@ hardware_interface::return_type MecanumSerialHardware::read(
   }
 
   process_receive_buffer();
+
+  // Arduino reports wheel angular velocity in rad/s. Integrating it gives
+  // robot_state_publisher a continuous joint angle for RViz wheel animation.
+  const double dt = period.seconds();
+  if (std::isfinite(dt) && dt > 0.0)
+  {
+    for (std::size_t i = 0; i < position_states_.size(); ++i)
+    {
+      position_states_[i] += velocity_states_[i] * dt;
+    }
+  }
   return hardware_interface::return_type::OK;
 }
 
@@ -211,6 +231,7 @@ hardware_interface::return_type MecanumSerialHardware::write(
   const rclcpp::Duration &)
 {
   std::array<double, 4> safe_commands{};
+  bool has_motion_command = false;
 
   for (std::size_t i = 0; i < safe_commands.size(); ++i)
   {
@@ -231,6 +252,22 @@ hardware_interface::return_type MecanumSerialHardware::write(
     }
 
     safe_commands[i] = value;
+    has_motion_command = has_motion_command || std::abs(value) > 1.0e-4;
+  }
+
+  // Use the Arduino's explicit STOP command while idle. During the initial
+  // reset guard even non-zero controller output is ignored.
+  if (startup_stop_cycles_ > 0)
+  {
+    --startup_stop_cycles_;
+    return send_line("S\n") ? hardware_interface::return_type::OK :
+           hardware_interface::return_type::ERROR;
+  }
+
+  if (!has_motion_command)
+  {
+    return send_line("S\n") ? hardware_interface::return_type::OK :
+           hardware_interface::return_type::ERROR;
   }
 
   std::ostringstream message;
@@ -243,14 +280,10 @@ hardware_interface::return_type MecanumSerialHardware::write(
 
   const std::string serial_message = message.str();
 
-  static unsigned int debug_write_count = 0;
-  if (++debug_write_count % 50 == 0)
-  {
-    RCLCPP_INFO(
-      rclcpp::get_logger("MecanumSerialHardware"),
-      "Serial TX: %s",
-      serial_message.c_str());
-  }
+  RCLCPP_DEBUG(
+    rclcpp::get_logger("MecanumSerialHardware"),
+    "Serial TX: %s",
+    serial_message.c_str());
 
   if (!send_line(serial_message))
   {
@@ -382,15 +415,21 @@ void MecanumSerialHardware::process_receive_buffer()
       line.pop_back();
     }
 
-    if (
+    if (line.rfind("ERR,", 0) == 0)
+    {
+      RCLCPP_WARN(
+        rclcpp::get_logger("MecanumSerialHardware"),
+        "Serial RX: %s",
+        line.c_str());
+    }
+    else if (
       line == "OK,V" ||
       line == "OK,S" ||
       line == "PONG" ||
       line.rfind("READY,", 0) == 0 ||
-      line.rfind("FORMAT,", 0) == 0 ||
-      line.rfind("ERR,", 0) == 0)
+      line.rfind("FORMAT,", 0) == 0)
     {
-      RCLCPP_INFO(
+      RCLCPP_DEBUG(
         rclcpp::get_logger("MecanumSerialHardware"),
         "Serial RX: %s",
         line.c_str());
@@ -410,6 +449,14 @@ void MecanumSerialHardware::process_receive_buffer()
       velocity_states_[1] = fr;
       velocity_states_[2] = rl;
       velocity_states_[3] = rr;
+
+      if (!run_announced_)
+      {
+        RCLCPP_INFO(
+          rclcpp::get_logger("MecanumSerialHardware"),
+          "Run!");
+        run_announced_ = true;
+      }
     }
   }
 
