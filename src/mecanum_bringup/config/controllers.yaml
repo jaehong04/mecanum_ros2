@@ -25,7 +25,7 @@ mecanum_drive_controller:
 
     kinematics:
       wheels_radius: 0.04
-      sum_of_robot_center_projection_on_X_Y_axis: 0.205
+      sum_of_robot_center_projection_on_X_Y_axis: 0.199546
       base_frame_offset:
         x: 0.0
         y: 0.0
