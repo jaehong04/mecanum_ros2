@@ -4,47 +4,67 @@
 
   <xacro:arg name="serial_port" default="/dev/ttyUSB0"/>
 
-  <!-- 실제 측정값 -->
-  <xacro:property name="wheel_radius" value="0.04"/>
-  <xacro:property name="half_wheelbase" value="0.095"/>
-  <xacro:property name="half_track" value="0.11"/>
+  <!-- ====================================================== -->
+  <!-- ROBOT GEOMETRY                                         -->
+  <!-- ====================================================== -->
 
-  <!-- 시각화용 값 -->
+  <xacro:property name="wheel_radius" value="0.04"/>
   <xacro:property name="wheel_width" value="0.04"/>
 
-  <material name="body_blue">
-    <color rgba="0.05 0.32 0.75 1.0"/>
+  <!-- CAD 측정 휠 중심 위치 -->
+  <!-- Front-Rear = 192.091 mm -->
+  <!-- Left-Right = 207.001 mm -->
+  <xacro:property name="half_wheelbase" value="0.0960455"/>
+  <xacro:property name="half_track" value="0.1035005"/>
+  <xacro:property name="wheel_z" value="0.040"/>
+
+
+  <!-- ====================================================== -->
+  <!-- MATERIALS                                              -->
+  <!-- ====================================================== -->
+
+  <material name="chassis_gray">
+    <color rgba="0.65 0.65 0.65 1.0"/>
   </material>
-  <material name="wheel_dark">
-    <color rgba="0.04 0.04 0.04 1.0"/>
+
+  <material name="wheel_black">
+    <color rgba="0.28 0.28 0.28 1.0"/>
   </material>
-  <material name="encoder_marker">
+
+  <material name="imu_orange">
     <color rgba="1.0 0.55 0.0 1.0"/>
   </material>
-  <material name="front_marker">
-    <color rgba="0.9 0.08 0.08 1.0"/>
-  </material>
+
+
+  <!-- ====================================================== -->
+  <!-- BASE LINK / CHASSIS                                    -->
+  <!-- ====================================================== -->
 
   <link name="base_link">
+
+    <!--
+      Fusion 360에서 분리한 chassis.stl.
+      STL 좌표는 기존 전체 CAD와 동일한 원래 조립 좌표를 유지한다.
+      STL 단위 mm -> ROS 단위 m.
+    -->
     <visual>
-      <origin xyz="0 0 0.06" rpy="0 0 0"/>
+      <origin
+        xyz="-0.010077 -0.218790 -0.117133"
+        rpy="0 0 0"/>
+
       <geometry>
-        <box size="0.25 0.20 0.08"/>
+        <mesh
+          filename="package://mecanum_bringup/meshes/chassis.stl"
+          scale="0.001 0.001 0.001"/>
       </geometry>
-      <material name="body_blue"/>
+
+      <material name="chassis_gray"/>
     </visual>
 
-    <!-- Red front marker makes chassis direction obvious in RViz. -->
-    <visual>
-      <origin xyz="0.105 0 0.105" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.045 0.10 0.012"/>
-      </geometry>
-      <material name="front_marker"/>
-    </visual>
-
+    <!-- Collision은 기존 단순 형상 유지 -->
     <collision>
       <origin xyz="0 0 0.06" rpy="0 0 0"/>
+
       <geometry>
         <box size="0.25 0.20 0.08"/>
       </geometry>
@@ -52,123 +72,255 @@
 
     <inertial>
       <origin xyz="0 0 0.06" rpy="0 0 0"/>
+
       <mass value="3.0"/>
+
       <inertia
-        ixx="0.02" ixy="0.0" ixz="0.0"
-        iyy="0.02" iyz="0.0"
+        ixx="0.02"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.02"
+        iyz="0.0"
         izz="0.03"/>
     </inertial>
+
   </link>
+
+
+  <!-- ====================================================== -->
+  <!-- IMU                                                    -->
+  <!-- ====================================================== -->
 
   <link name="imu_link">
+
     <visual>
-      <geometry><box size="0.035 0.025 0.008"/></geometry>
-      <material name="encoder_marker"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+
+      <geometry>
+        <box size="0.035 0.025 0.008"/>
+      </geometry>
+
+      <material name="imu_orange"/>
     </visual>
+
   </link>
+
   <joint name="imu_joint" type="fixed">
+
     <parent link="base_link"/>
     <child link="imu_link"/>
-    <!-- Change xyz/rpy to the measured IMU mounting pose. -->
-    <origin xyz="0 0 0.115" rpy="0 0 0"/>
+
+    <!-- 실제 장착 위치: 하단 플레이트 중앙 -->
+    <origin
+      xyz="0 0 0.028"
+      rpy="0 0 0"/>
+
   </joint>
 
-  <xacro:macro name="wheel" params="prefix x y">
+
+  <!-- ====================================================== -->
+  <!-- WHEEL MACRO                                            -->
+  <!-- ====================================================== -->
+
+  <xacro:macro
+    name="wheel"
+    params="prefix x y mesh_file mesh_x mesh_y mesh_z">
+
     <link name="${prefix}_wheel_link">
+
+      <!-- 실제 분리된 메카넘 휠 CAD -->
       <visual>
-        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+
+        <!--
+          각 STL은 Fusion의 원래 조립 좌표를 유지하므로
+          wheel_link 중심 기준으로 CAD 좌표를 역변환한다.
+        -->
+        <origin
+          xyz="${mesh_x} ${mesh_y} ${mesh_z}"
+          rpy="0 0 0"/>
+
         <geometry>
-          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+          <mesh
+            filename="package://mecanum_bringup/meshes/${mesh_file}"
+            scale="0.001 0.001 0.001"/>
         </geometry>
-        <material name="wheel_dark"/>
+
+        <material name="wheel_black"/>
+
       </visual>
 
-      <!-- An asymmetric spoke makes encoder-driven joint rotation visible. -->
-      <visual>
-        <origin xyz="${wheel_radius * 0.48} 0 0" rpy="0 0 0"/>
-        <geometry>
-          <box size="${wheel_radius * 0.9} ${wheel_width * 1.08} 0.007"/>
-        </geometry>
-        <material name="encoder_marker"/>
-      </visual>
 
+      <!-- Collision은 단순 cylinder 유지 -->
       <collision>
-        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+
+        <origin
+          xyz="0 0 0"
+          rpy="${pi/2} 0 0"/>
+
         <geometry>
-          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+          <cylinder
+            radius="${wheel_radius}"
+            length="${wheel_width}"/>
         </geometry>
+
       </collision>
 
+
       <inertial>
+
         <mass value="0.2"/>
+
         <inertia
-          ixx="0.0002" ixy="0.0" ixz="0.0"
-          iyy="0.0002" iyz="0.0"
+          ixx="0.0002"
+          ixy="0.0"
+          ixz="0.0"
+          iyy="0.0002"
+          iyz="0.0"
           izz="0.0002"/>
+
       </inertial>
+
     </link>
 
-    <joint name="${prefix}_wheel_joint" type="continuous">
+
+    <joint
+      name="${prefix}_wheel_joint"
+      type="continuous">
+
       <parent link="base_link"/>
       <child link="${prefix}_wheel_link"/>
-      <origin xyz="${x} ${y} ${wheel_radius}" rpy="0 0 0"/>
+
+      <origin
+        xyz="${x} ${y} ${wheel_z}"
+        rpy="0 0 0"/>
+
+      <!-- 휠 회전축 -->
       <axis xyz="0 1 0"/>
+
     </joint>
+
   </xacro:macro>
+
+
+  <!-- ====================================================== -->
+  <!-- FRONT LEFT                                             -->
+  <!-- ====================================================== -->
 
   <xacro:wheel
     prefix="front_left"
     x="${half_wheelbase}"
-    y="${half_track}"/>
+    y="${half_track}"
+    mesh_file="wheel_FL.stl"
+    mesh_x="-0.1061225"
+    mesh_y="-0.3222905"
+    mesh_z="-0.157133"/>
+
+
+  <!-- ====================================================== -->
+  <!-- FRONT RIGHT                                            -->
+  <!-- ====================================================== -->
 
   <xacro:wheel
     prefix="front_right"
     x="${half_wheelbase}"
-    y="${-half_track}"/>
+    y="${-half_track}"
+    mesh_file="wheel_FR.stl"
+    mesh_x="-0.1061225"
+    mesh_y="-0.1152895"
+    mesh_z="-0.157133"/>
+
+
+  <!-- ====================================================== -->
+  <!-- REAR LEFT                                              -->
+  <!-- ====================================================== -->
 
   <xacro:wheel
     prefix="rear_left"
     x="${-half_wheelbase}"
-    y="${half_track}"/>
+    y="${half_track}"
+    mesh_file="wheel_RL.stl"
+    mesh_x="0.0859685"
+    mesh_y="-0.3222905"
+    mesh_z="-0.157133"/>
+
+
+  <!-- ====================================================== -->
+  <!-- REAR RIGHT                                             -->
+  <!-- ====================================================== -->
 
   <xacro:wheel
     prefix="rear_right"
     x="${-half_wheelbase}"
-    y="${-half_track}"/>
+    y="${-half_track}"
+    mesh_file="wheel_RR.stl"
+    mesh_x="0.0859685"
+    mesh_y="-0.1152895"
+    mesh_z="-0.157133"/>
 
-  <ros2_control name="MecanumSerialSystem" type="system">
+
+  <!-- ====================================================== -->
+  <!-- ROS2 CONTROL                                           -->
+  <!-- ====================================================== -->
+
+  <ros2_control
+    name="MecanumSerialSystem"
+    type="system">
+
     <hardware>
+
       <plugin>mecanum_serial_hardware/MecanumSerialHardware</plugin>
 
       <param name="port">$(arg serial_port)</param>
+
       <param name="baud_rate">115200</param>
+
     </hardware>
 
-    <!-- 순서 중요: FL, FR, RL, RR -->
 
+    <!-- FL -->
     <joint name="front_left_wheel_joint">
+
       <command_interface name="velocity"/>
+
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+
     </joint>
 
+
+    <!-- FR -->
     <joint name="front_right_wheel_joint">
+
       <command_interface name="velocity"/>
+
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+
     </joint>
 
+
+    <!-- RL -->
     <joint name="rear_left_wheel_joint">
+
       <command_interface name="velocity"/>
+
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+
     </joint>
 
+
+    <!-- RR -->
     <joint name="rear_right_wheel_joint">
+
       <command_interface name="velocity"/>
+
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+
     </joint>
+
   </ros2_control>
+
 
 </robot>
