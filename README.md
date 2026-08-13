@@ -115,3 +115,127 @@ Raspberry Pi 4에서 다음 기능이 정상 동작한 기준 버전이다.
 - Forward / Backward
 - Left / Right Mecanum Motion
 - Left / Right 90 degree Rotation
+
+
+---
+
+# Jetson Current Status
+
+현재 Raspberry Pi 기반 시스템의 Jetson Orin Nano Super 이전이 완료되었다.
+
+## Verified on Jetson
+
+- Ubuntu 22.04 / ROS2 Humble
+- ROS_DOMAIN_ID=78
+- Arduino UNO Serial Communication
+- 4 Mecanum Motor Control
+- Encoder Feedback
+- Joint State
+- Wheel Odometry
+- WitMotion IMU approximately 100 Hz
+- robot_localization EKF approximately 50 Hz
+- odom -> base_link TF
+- CAD-based RViz Robot Model
+- Individual Wheel Joint Animation
+
+## Mecanum Kinematics
+
+```text
+wheel_radius: 0.04 m
+sum_of_robot_center_projection_on_X_Y_axis: 0.199546 m
+```
+
+CAD measured wheel-center geometry:
+
+```text
+Front-Rear: approximately 192.091 mm
+Left-Right: approximately 207.001 mm
+```
+
+The value `0.199546` was selected after comparison with the previous
+`0.205` setting using repeated left/right 90 degree rotation tests.
+
+## Nav2
+
+ROS2 Humble Navigation2 is installed and configured for holonomic Mecanum motion.
+
+Controller:
+
+```text
+dwb_core::DWBLocalPlanner
+```
+
+Initial velocity limits:
+
+```text
+X:   -0.12 ~ +0.12 m/s
+Y:   -0.12 ~ +0.12 m/s
+Yaw: -0.70 ~ +0.70 rad/s
+```
+
+Nav2 command path:
+
+```text
+controller_server
+      |
+      v
+/cmd_vel_nav
+      |
+      v
+velocity_smoother
+      |
+      v
+/mecanum_drive_controller/reference_unstamped
+      |
+      v
+MecanumDriveController
+      |
+      v
+Arduino UNO / Motors
+```
+
+Actual hardware command tests completed:
+
+- Forward X motion
+- Lateral Y motion
+- Yaw rotation
+
+Nav2 robot footprint:
+
+```text
+[[0.145, 0.123],
+ [0.145, -0.123],
+ [-0.145, -0.123],
+ [-0.145, 0.123]]
+```
+
+Footprint padding:
+
+```text
+0.01 m
+```
+
+## Remaining Nav2 Integration
+
+External camera integration is still required for:
+
+- Global localization
+- map -> odom
+- Obstacle / object information
+- Nav2 Costmap
+- Full autonomous navigation
+
+## Stable Versions
+
+```text
+v1.0-rpi-working
+v2.0-jetson-working
+v2.1-jetson-calibrated
+v2.2-nav2-ready
+```
+
+Current stable baseline:
+
+```text
+v2.2-nav2-ready
+```
