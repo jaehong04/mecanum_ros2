@@ -58,6 +58,9 @@ def generate_launch_description():
             {"robot_description": robot_description},
             controllers_file,
         ],
+        remappings=[
+            ("/mecanum_drive_controller/reference_unstamped", "/cmd_vel"),
+        ],
     )
 
     ekf = Node(

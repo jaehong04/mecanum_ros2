@@ -55,10 +55,10 @@ def generate_launch_description():
             #   cmd_vel_smoothed -> cmd_vel
             #
             # 여기서는 최종 smoother 출력만
-            # mecanum controller 입력으로 연결한다.
+            # standard robot velocity input /cmd_vel로 연결한다.
             SetRemap(
                 src="cmd_vel_smoothed",
-                dst="/mecanum_drive_controller/reference_unstamped",
+                dst="/cmd_vel",
             ),
 
             nav2_launch,

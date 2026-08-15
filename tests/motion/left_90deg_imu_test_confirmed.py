@@ -12,7 +12,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 PORT = "/dev/ttyUSB0"
 BAUD = 115200
 
-TOPIC = "/mecanum_drive_controller/reference_unstamped"
+TOPIC = "/cmd_vel"
 
 GYRO_SCALE = 2000.0 / 32768.0
 ANGLE_SCALE = 180.0 / 32768.0

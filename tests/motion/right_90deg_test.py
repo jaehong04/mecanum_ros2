@@ -12,7 +12,7 @@ node = rclpy.create_node('right_90deg_test')
 
 publisher = node.create_publisher(
     Twist,
-    '/mecanum_drive_controller/reference_unstamped',
+    '/cmd_vel',
     10
 )
 

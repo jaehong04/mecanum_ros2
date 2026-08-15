@@ -11,7 +11,7 @@ node = rclpy.create_node('left_10cm_test')
 
 pub = node.create_publisher(
     Twist,
-    '/mecanum_drive_controller/reference_unstamped',
+    '/cmd_vel',
     10
 )
 
