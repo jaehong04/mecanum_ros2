@@ -42,11 +42,13 @@ Robot description, controller configuration 및 Bringup Launch 관리.
 
 ## Command Topic
 
-`/mecanum_drive_controller/reference_unstamped`
+`/cmd_vel`
 
 Type:
 
 `geometry_msgs/msg/Twist`
+
+The `mecanum_drive_controller` internal `reference_unstamped` input is remapped to `/cmd_vel`.
 
 - linear.x : Forward / Backward
 - linear.y : Left / Right
@@ -185,7 +187,7 @@ controller_server
 velocity_smoother
       |
       v
-/mecanum_drive_controller/reference_unstamped
+/cmd_vel
       |
       v
 MecanumDriveController
