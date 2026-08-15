@@ -120,7 +120,7 @@ def generate_launch_description():
             description="Arduino serial device (prefer a /dev/serial/by-id path)",
         ),
         DeclareLaunchArgument(
-            "use_rviz", default_value="true",
+            "use_rviz", default_value="false",
             description="Start RViz2 with the mecanum TF display",
         ),
         DeclareLaunchArgument(

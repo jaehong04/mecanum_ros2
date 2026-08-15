@@ -1,3 +1,6 @@
+#include <sys/ioctl.h>
+#include <thread>
+#include <chrono>
 #include "mecanum_serial_hardware/mecanum_serial_hardware.hpp"
 
 #include <cerrno>
@@ -348,7 +351,104 @@ bool MecanumSerialHardware::open_serial()
   }
 
   tcflush(serial_fd_, TCIOFLUSH);
-  return true;
+
+  // Bringup 시작 때 Arduino를 항상 알려진 상태로 재시작한다.
+  // 수동 RESET 버튼을 누르는 동작을 DTR로 자동화.
+  int dtr_flag = TIOCM_DTR;
+
+  if (::ioctl(serial_fd_, TIOCMBIC, &dtr_flag) == 0)
+  {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    ::ioctl(serial_fd_, TIOCMBIS, &dtr_flag);
+
+    RCLCPP_INFO(
+      rclcpp::get_logger("MecanumSerialHardware"),
+      "Arduino reset pulse sent");
+  }
+  else
+  {
+    RCLCPP_WARN(
+      rclcpp::get_logger("MecanumSerialHardware"),
+      "Could not toggle Arduino DTR reset: %s",
+      std::strerror(errno));
+  }
+
+  // UNO bootloader + setup() 완료 대기
+  RCLCPP_INFO(
+    rclcpp::get_logger("MecanumSerialHardware"),
+    "Waiting for Arduino startup...");
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+
+  // 부팅 중 들어온 READY/FORMAT/기타 데이터를 정리한 뒤 handshake 시작
+  tcflush(serial_fd_, TCIOFLUSH);
+
+  RCLCPP_INFO(
+    rclcpp::get_logger("MecanumSerialHardware"),
+    "Checking Arduino PING/PONG handshake...");
+
+  std::string handshake_buffer;
+  char handshake_chunk[256];
+
+  for (int attempt = 1; attempt <= 10; ++attempt)
+  {
+    if (!send_line("PING\n"))
+    {
+      RCLCPP_ERROR(
+        rclcpp::get_logger("MecanumSerialHardware"),
+        "Failed to send PING");
+      close_serial();
+      return false;
+    }
+
+    for (int wait_step = 0; wait_step < 10; ++wait_step)
+    {
+      const ssize_t count =
+        ::read(serial_fd_, handshake_chunk, sizeof(handshake_chunk));
+
+      if (count > 0)
+      {
+        handshake_buffer.append(
+          handshake_chunk,
+          static_cast<std::size_t>(count));
+
+        if (handshake_buffer.find("PONG") != std::string::npos)
+        {
+          RCLCPP_INFO(
+            rclcpp::get_logger("MecanumSerialHardware"),
+            "Arduino handshake OK (PONG)");
+
+          receive_buffer_.clear();
+          tcflush(serial_fd_, TCIFLUSH);
+          return true;
+        }
+      }
+      else if (
+        count < 0 &&
+        errno != EAGAIN &&
+        errno != EWOULDBLOCK)
+      {
+        RCLCPP_WARN(
+          rclcpp::get_logger("MecanumSerialHardware"),
+          "Handshake read error: %s",
+          std::strerror(errno));
+      }
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    RCLCPP_WARN(
+      rclcpp::get_logger("MecanumSerialHardware"),
+      "No PONG yet, retry %d/10",
+      attempt);
+  }
+
+  RCLCPP_ERROR(
+    rclcpp::get_logger("MecanumSerialHardware"),
+    "Arduino handshake failed: no PONG");
+
+  close_serial();
+  return false;
 }
 
 void MecanumSerialHardware::close_serial()
