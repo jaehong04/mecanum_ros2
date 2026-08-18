@@ -1,0 +1,20 @@
+{
+  "image_width": 1920,
+  "image_height": 1080,
+  "checkerboard_inner_corners": [5, 3],
+  "square_size_mm": 40.0,
+  "selected_calibration_frames": 18,
+  "rms_reprojection_error_px": 0.20571622922708746,
+  "camera_matrix": [
+    [1193.9285743624512, 0.0, 905.4672749500978],
+    [0.0, 1191.56191006301, 513.000222084921],
+    [0.0, 0.0, 1.0]
+  ],
+  "distortion_coefficients_k1_k2_p1_p2_k3": [
+    -0.20298479067273242,
+    0.13060299315148366,
+    0.027118263577020307,
+    0.003928149452520465,
+    -0.06119022290385212
+  ]
+}
