@@ -39,7 +39,7 @@ Visualization Manager:
       Normal Cell Count: 0
       Offset:
         X: 0
-        Y: 40
+        Y: 0
         Z: 0
       Plane: XY
       Plane Cell Count: 40
@@ -208,7 +208,7 @@ Visualization Manager:
         Value: false
       Focal Point:
         X: 0
-        Y: 40
+        Y: 0
         Z: 0.03999999910593033
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
