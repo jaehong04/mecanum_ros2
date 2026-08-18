@@ -40,6 +40,11 @@ def generate_launch_description():
         "config",
         "ekf.yaml",
     ])
+    ekf_global_file = PathJoinSubstitution([
+        FindPackageShare("mecanum_bringup"),
+        "config",
+        "ekf_global.yaml",
+    ])
 
     robot_state_publisher = Node(
         package="robot_state_publisher",
@@ -58,9 +63,6 @@ def generate_launch_description():
             {"robot_description": robot_description},
             controllers_file,
         ],
-        remappings=[
-            ("/mecanum_drive_controller/reference_unstamped", "/cmd_vel"),
-        ],
     )
 
     ekf = Node(
@@ -70,6 +72,15 @@ def generate_launch_description():
         output="screen",
         parameters=[ekf_file],
         remappings=[("odometry/filtered", "/odometry/filtered")],
+    )
+
+    ekf_global = Node(
+        package="robot_localization",
+        executable="ekf_node",
+        name="ekf_global_filter_node",
+        output="screen",
+        parameters=[ekf_global_file],
+        remappings=[("odometry/filtered", "/odometry/global")],
     )
 
     imu = Node(
@@ -83,6 +94,13 @@ def generate_launch_description():
             "baud": 115200,
             "frame_id": "imu_link",
         }],
+    )
+
+    cmd_vel_bridge = Node(
+        package="mecanum_bringup",
+        executable="cmd_vel_bridge",
+        name="cmd_vel_bridge",
+        output="screen",
     )
 
     joint_state_broadcaster_spawner = Node(
@@ -136,8 +154,10 @@ def generate_launch_description():
         ),
         robot_state_publisher,
         controller_manager,
+        cmd_vel_bridge,
         imu,
         ekf,
+        ekf_global,
         joint_state_broadcaster_spawner,
         RegisterEventHandler(
             OnProcessExit(

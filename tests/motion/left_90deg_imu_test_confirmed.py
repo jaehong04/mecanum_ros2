@@ -9,7 +9,7 @@ from geometry_msgs.msg import Twist
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 
-PORT = "/dev/ttyUSB0"
+PORT = "/dev/serial/by-path/platform-3610000.usb-usb-0:2.1:1.0-port0"
 BAUD = 115200
 
 TOPIC = "/cmd_vel"
@@ -190,12 +190,10 @@ def main():
             else:
                 stationary_start = None
 
-        relative_yaw = wrap_angle(final_yaw - start_yaw)
 
         print()
         print(f"정지 명령 시 자이로각: {command_stop_angle:+.2f}도")
         print(f"최종 자이로 누적각: {integrated_angle:+.2f}도")
-        print(f"절대 Yaw 변화: {relative_yaw:+.2f}도")
         print(f"정지 후 관성 회전: {integrated_angle - command_stop_angle:+.2f}도")
         print(f"종료 원인: {stop_reason}")
         print("정지 완료")

@@ -18,6 +18,7 @@ install(FILES README.md DESTINATION share/${PROJECT_NAME})
 install(PROGRAMS
   scripts/mecanum_keyboard
   scripts/witmotion_ble_imu
+  scripts/cmd_vel_bridge
   DESTINATION lib/${PROJECT_NAME}
 )
 
