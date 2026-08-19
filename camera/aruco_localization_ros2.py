@@ -82,72 +82,83 @@ if YAW_OFFSET_FILE.exists():
 
 
 # ==================================================
-# 바닥 60x60 영역 표시
+# Camera World -> ROS map 좌표 변환
 # ==================================================
-FLOOR_H_FILE = "homography_60cm.npy"
-TILE_SIZE_CM = 60.0
+# Camera World:
+#   +X = 180도 회전 화면의 왼쪽
+#   +Y = 180도 회전 화면의 위쪽
+#   +Z = 실제 아래쪽
+#
+# ROS map:
+#   +X = 180도 회전 화면의 오른쪽
+#   +Y = 180도 회전 화면의 위쪽
+#   +Z = 실제 위쪽
+#
+# 3D 기준 Y축 180도 회전:
+#   X_ros = -X_cam
+#   Y_ros =  Y_cam
+#   Z_ros = -Z_cam
+# ==================================================
+def camera_world_to_ros_map_xy(x_cam, y_cam):
+    return -float(x_cam), float(y_cam)
 
-floor_points = []
 
-if Path(FLOOR_H_FILE).exists():
+def camera_direction_to_ros_map(dx_cam, dy_cam):
+    return -float(dx_cam), float(dy_cam)
 
-    floor_H = np.load(FLOOR_H_FILE)
 
-    world_corners = np.array([
-        [[0.0, 0.0]],
-        [[TILE_SIZE_CM, 0.0]],
-        [[TILE_SIZE_CM, TILE_SIZE_CM]],
-        [[0.0, TILE_SIZE_CM]]
-    ], dtype=np.float32)
+# ==================================================
+# Nav2 실제 주행 가능 영역 표시
+# ==================================================
+# 최종 직사각형 drive area
+#
+# X: -0.607456 ~ +0.585724 m
+# Y: -0.645901 ~ +1.701045 m
+#
+# 이 값은 drive_area 측정값의 서로 마주보는 변을 평균하여
+# 만든 최종 Nav2 직사각형 주행 가능 영역과 동일하다.
+# ==================================================
 
-    inv_H = np.linalg.inv(floor_H)
+DRIVE_MIN_X = -0.607456
+DRIVE_MAX_X =  0.585724
+DRIVE_MIN_Y = -0.645901
+DRIVE_MAX_Y =  1.701045
 
-    undistorted_points = cv2.perspectiveTransform(
-        world_corners,
-        inv_H
-    ).reshape(-1, 2)
+# 바닥 평면이므로 Z = 0
+drive_world_corners = np.array([
+    [DRIVE_MIN_X, DRIVE_MIN_Y, 0.0],
+    [DRIVE_MAX_X, DRIVE_MIN_Y, 0.0],
+    [DRIVE_MAX_X, DRIVE_MAX_Y, 0.0],
+    [DRIVE_MIN_X, DRIVE_MAX_Y, 0.0],
+], dtype=np.float64)
 
-    ones = np.ones(
-        (len(undistorted_points), 1),
-        dtype=np.float64
+# World -> Camera
+R_world_to_camera = R_camera_to_world.T
+
+camera_points = np.array([
+    R_world_to_camera @ (
+        world_point - camera_position_world
     )
+    for world_point in drive_world_corners
+], dtype=np.float64)
 
-    homogeneous = np.hstack([
-        undistorted_points.astype(np.float64),
-        ones
-    ])
+# Camera 좌표 -> 원본 1920x1080 이미지 픽셀
+raw_points, _ = cv2.projectPoints(
+    camera_points.reshape(-1, 1, 3),
+    np.zeros(3),
+    np.zeros(3),
+    K,
+    dist
+)
 
-    normalized = (
-        np.linalg.inv(K) @ homogeneous.T
-    ).T
+raw_points = raw_points.reshape(-1, 2)
 
-    normalized_xy = (
-        normalized[:, :2]
-        / normalized[:, 2:3]
-    )
+floor_points = [
+    (int(round(x)), int(round(y)))
+    for x, y in raw_points
+]
 
-    object_points = np.column_stack([
-        normalized_xy,
-        np.ones(len(normalized_xy))
-    ])
-
-    raw_points, _ = cv2.projectPoints(
-        object_points,
-        np.zeros(3),
-        np.zeros(3),
-        K,
-        dist
-    )
-
-    raw_points = raw_points.reshape(-1, 2)
-
-    floor_points = [
-        (int(round(x)), int(round(y)))
-        for x, y in raw_points
-    ]
-
-    print("바닥 기준점 1~4:", floor_points)
-
+print("Nav2 drive area pixel points:", floor_points)
 
 # ==================================================
 # Pixel -> World plane
@@ -327,6 +338,9 @@ while True:
     if not ok:
         break
 
+    text1 = None
+    text2 = None
+
     # ----------------------------------------------
     # 검출용 영상은 overlay 전에 보존
     # ----------------------------------------------
@@ -336,8 +350,8 @@ while True:
     # ArUco detection ROI
     # 바닥 캘리브레이션 영역 주변만 검출하여 처리 속도 향상
     # ----------------------------------------------
-    ROI_X1, ROI_Y1 = 850, 200
-    ROI_X2, ROI_Y2 = 1320, 580
+    ROI_X1, ROI_Y1 = 509, 34
+    ROI_X2, ROI_Y2 = 1382, 1080
 
     detect_roi = detect_frame[
         ROI_Y1:ROI_Y2,
@@ -401,18 +415,6 @@ while True:
                 -1
             )
 
-            cv2.putText(
-                frame,
-                str(i + 1),
-                (
-                    point[0] + 10,
-                    point[1] - 10
-                ),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 255),
-                2
-            )
 
 
     # ----------------------------------------------
@@ -462,11 +464,12 @@ while True:
             # --------------------------------------
             # X / Y
             # --------------------------------------
-            x = float(center_world[0])
-            y = float(center_world[1])
+            # Camera World 좌표
+            x_cam = float(center_world[0])
+            y_cam = float(center_world[1])
 
             position_history.append(
-                [x, y]
+                [x_cam, y_cam]
             )
 
             filtered_xy = np.median(
@@ -474,27 +477,44 @@ while True:
                 axis=0
             )
 
-            fx = float(filtered_xy[0])
-            fy = float(filtered_xy[1])
+            filtered_cam_x = float(filtered_xy[0])
+            filtered_cam_y = float(filtered_xy[1])
+
+            # Camera World -> ROS map
+            fx, fy = camera_world_to_ros_map_xy(
+                filtered_cam_x,
+                filtered_cam_y
+            )
 
 
             # --------------------------------------
             # Yaw
             # --------------------------------------
-            direction = (
+            # Camera World 방향 벡터
+            direction_cam = (
                 top_world[:2]
                 - center_world[:2]
             )
 
+            # Camera World -> ROS map 방향 벡터
+            dx_map, dy_map = camera_direction_to_ros_map(
+                direction_cam[0],
+                direction_cam[1]
+            )
+
+            # ROS map 기준 raw yaw
             raw_yaw = math.atan2(
-                direction[1],
-                direction[0]
+                dy_map,
+                dx_map
             )
 
             last_raw_yaw = raw_yaw
 
+            # ROS 표준:
+            # +Yaw = CCW
+            # Yaw 0 = map +X
             yaw = wrap_angle(
-                -(raw_yaw - yaw_offset)
+                raw_yaw - yaw_offset
             )
 
             yaw_history.append(yaw)
@@ -607,34 +627,78 @@ while True:
                 f"({filtered_yaw:.3f} rad)"
             )
 
-            cv2.putText(
-                frame,
-                text1,
-                (30, 55),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                (0, 255, 0),
-                2
-            )
-
-            cv2.putText(
-                frame,
-                text2,
-                (30, 100),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                (0, 255, 255),
-                2
-            )
 
 
             # 실시간 값은 OpenCV 화면에만 표시
             # 터미널 출력은 P 키를 눌렀을 때만 수행
 
 
+    # ----------------------------------------------
+    # 화면 표시 방향: 180도 회전
+    # 위치 계산 / ROS 좌표계에는 영향 없음
+    # ----------------------------------------------
+    display = cv2.flip(frame, -1)
+
+    # --------------------------------------------------
+    # 바닥 기준점 1~4 번호
+    #
+    # polygon / 빨간 점은 원본 frame에 그린 뒤 영상과 함께
+    # 180도 회전되므로 위치는 이미 맞는다.
+    #
+    # 숫자만 회전 후 display 위에 다시 그려서
+    # 글자가 거꾸로 보이지 않도록 한다.
+    #
+    # 번호 자체는 기존 calibration point ID를 그대로 유지한다.
+    # --------------------------------------------------
+    if 'floor_points' in locals() and len(floor_points) == 4:
+
+        display_h, display_w = display.shape[:2]
+
+        for i, point in enumerate(floor_points):
+
+            display_point = (
+                display_w - 1 - int(point[0]),
+                display_h - 1 - int(point[1])
+            )
+
+            cv2.putText(
+                display,
+                str(i + 1),
+                (
+                    display_point[0] + 10,
+                    display_point[1] - 10
+                ),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 0, 255),
+                2
+            )
+
+    if text1 is not None:
+        cv2.putText(
+            display,
+            text1,
+            (30, 55),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 255, 0),
+            2
+        )
+
+    if text2 is not None:
+        cv2.putText(
+            display,
+            text2,
+            (30, 100),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 255, 255),
+            2
+        )
+
     cv2.imshow(
         WINDOW,
-        frame
+        display
     )
 
     key = cv2.waitKey(1) & 0xFF
