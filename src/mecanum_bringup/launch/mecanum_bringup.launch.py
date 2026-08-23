@@ -90,7 +90,7 @@ def generate_launch_description():
         output="screen",
         condition=IfCondition(use_imu),
         parameters=[{
-            "port": "/dev/serial/by-path/platform-3610000.usb-usb-0:2.1:1.0-port0",
+            "port": "/dev/serial/by-path/platform-3610000.usb-usb-0:2.4:1.0-port0",
             "baud": 115200,
             "frame_id": "imu_link",
         }],
@@ -137,7 +137,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            "serial_port", default_value="/dev/serial/by-path/platform-3610000.usb-usb-0:2.3:1.0-port0",
+            "serial_port", default_value="/dev/serial/by-path/platform-3610000.usb-usb-0:2.2:1.0-port0",
             description="Arduino serial device (prefer a /dev/serial/by-id path)",
         ),
         DeclareLaunchArgument(
