@@ -16,7 +16,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 # ==================================================
 DEVICE = "/dev/v4l/by-id/usb-HD_Web_Camera_HD_Web_Camera_Ucamera001-video-index0"
 
-MARKER_HEIGHT_M = 0.163
+MARKER_HEIGHT_M = 0.244
 PLANE_Z = -MARKER_HEIGHT_M
 
 FILTER_WINDOW = 7
@@ -131,6 +131,52 @@ drive_world_corners = np.array([
     [DRIVE_MAX_X, DRIVE_MAX_Y, 0.0],
     [DRIVE_MIN_X, DRIVE_MAX_Y, 0.0],
 ], dtype=np.float64)
+
+
+# ==================================================
+# Camera 재보정용 실제 4개 기준점
+#
+# drive_area.json은 예전에 실제 바닥에서 직접 클릭했던
+# 4개의 물리적 지점과 World 좌표를 저장하고 있다.
+#
+# 원래 저장 순서(180도 화면):
+#
+#   original 1 = 좌상단
+#   original 2 = 우상단
+#   original 3 = 우하단
+#   original 4 = 좌하단
+#
+# 현재 Calibration UI 클릭 순서:
+#
+#   3 -------- 4
+#   |          |
+#   |          |
+#   2 -------- 1
+#
+# 따라서 대응 순서는:
+# current 1 -> original 3
+# current 2 -> original 4
+# current 3 -> original 1
+# current 4 -> original 2
+# ==================================================
+
+drive_area_data = json.loads(
+    Path("drive_area.json").read_text()
+)
+
+saved_drive_world = np.array([
+    [float(p[0]), float(p[1]), 0.0]
+    for p in drive_area_data["world_points_m"]
+], dtype=np.float64)
+
+if saved_drive_world.shape != (4, 3):
+    raise SystemExit(
+        "drive_area.json world_points_m 형식 오류"
+    )
+
+click_calib_world_points = saved_drive_world[
+    [2, 3, 0, 1]
+]
 
 # World -> Camera
 R_world_to_camera = R_camera_to_world.T
@@ -292,9 +338,834 @@ cv2.namedWindow(
 
 cv2.resizeWindow(
     WINDOW,
-    1280,
-    720
+    width,
+    height
 )
+
+
+# ==================================================
+# Startup Camera / Map Calibration Menu
+#
+# 시작:
+#   ENTER / E : 현재 저장된 Extrinsic 사용
+#   C         : Map 4점 다시 지정
+#   Q / ESC   : 종료
+#
+# 재보정:
+#
+#       3 ---------------- 4
+#       |                  |
+#       |      MAP         |
+#       |                  |
+#       2 ---------------- 1
+#
+# 180도 화면에서 1 -> 2 -> 3 -> 4 순서로 클릭
+# ==================================================
+
+START_VIEW_W = width
+START_VIEW_H = height
+
+
+def raw_to_start_view(raw_x, raw_y):
+
+    # RAW -> 180도 display
+    display_x = width - 1 - float(raw_x)
+    display_y = height - 1 - float(raw_y)
+
+    # RAW 1920x1080 -> DISPLAY 1920x1080
+    view_x = int(round(
+        display_x
+        * (START_VIEW_W - 1)
+        / (width - 1)
+    ))
+
+    view_y = int(round(
+        display_y
+        * (START_VIEW_H - 1)
+        / (height - 1)
+    ))
+
+    return view_x, view_y
+
+
+def start_view_to_raw(view_x, view_y):
+
+    # DISPLAY 1920x1080 -> RAW 1920x1080
+    display_x = int(round(
+        float(view_x)
+        * (width - 1)
+        / (START_VIEW_W - 1)
+    ))
+
+    display_y = int(round(
+        float(view_y)
+        * (height - 1)
+        / (START_VIEW_H - 1)
+    ))
+
+    # 180도 display -> RAW
+    raw_x = width - 1 - display_x
+    raw_y = height - 1 - display_y
+
+    return raw_x, raw_y
+
+
+def make_startup_window():
+
+    try:
+        cv2.destroyWindow(WINDOW)
+        cv2.waitKey(1)
+    except Exception:
+        pass
+
+    # Camera / Monitor 모두 1920x1080
+    # 시작 메뉴부터 실제 최대 해상도 전체화면 사용
+    cv2.namedWindow(
+        WINDOW,
+        cv2.WINDOW_NORMAL
+    )
+
+    cv2.setWindowProperty(
+        WINDOW,
+        cv2.WND_PROP_FULLSCREEN,
+        cv2.WINDOW_NORMAL
+    )
+
+    cv2.resizeWindow(
+        WINDOW,
+        width,
+        height
+    )
+
+
+def restore_main_window():
+
+    try:
+        cv2.destroyWindow(WINDOW)
+        cv2.waitKey(1)
+    except Exception:
+        pass
+
+    cv2.namedWindow(
+        WINDOW,
+        cv2.WINDOW_NORMAL
+    )
+
+    cv2.setWindowProperty(
+        WINDOW,
+        cv2.WND_PROP_FULLSCREEN,
+        cv2.WINDOW_NORMAL
+    )
+
+    cv2.resizeWindow(
+        WINDOW,
+        width,
+        height
+    )
+
+    cv2.setMouseCallback(
+        WINDOW,
+        lambda *args: None
+    )
+
+
+def get_start_view(frame):
+
+    display = cv2.flip(
+        frame,
+        -1
+    )
+
+    # Camera와 Display 모두 1920x1080
+    # 별도 resize 없이 그대로 사용
+    return display.copy()
+
+
+def draw_polygon_and_numbers(
+    image,
+    points,
+    line_color=(0, 255, 0),
+    point_color=(0, 0, 255)
+):
+
+    if len(points) >= 2:
+
+        pts = np.array(
+            points,
+            dtype=np.int32
+        ).reshape(-1, 1, 2)
+
+        cv2.polylines(
+            image,
+            [pts],
+            len(points) == 4,
+            line_color,
+            2
+        )
+
+    for i, (x, y) in enumerate(
+        points,
+        start=1
+    ):
+
+        cv2.circle(
+            image,
+            (int(x), int(y)),
+            7,
+            point_color,
+            -1
+        )
+
+        cv2.putText(
+            image,
+            str(i),
+            (int(x) + 10, int(y) - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.75,
+            point_color,
+            2
+        )
+
+
+def run_map_click_calibration():
+
+    global R_camera_to_world
+    global camera_position_world
+    global floor_points
+
+    clicked_view = []
+    clicked_raw = []
+
+    candidate = None
+
+    def mouse_callback(event, x, y, flags, param):
+
+        nonlocal candidate
+
+        if event != cv2.EVENT_LBUTTONDOWN:
+            return
+
+        # 후보 계산 후에는 추가 클릭 금지
+        if candidate is not None:
+            return
+
+        if len(clicked_view) >= 4:
+            return
+
+        view_x = max(
+            0,
+            min(START_VIEW_W - 1, int(x))
+        )
+
+        view_y = max(
+            0,
+            min(START_VIEW_H - 1, int(y))
+        )
+
+        raw_x, raw_y = start_view_to_raw(
+            view_x,
+            view_y
+        )
+
+        clicked_view.append(
+            (view_x, view_y)
+        )
+
+        clicked_raw.append(
+            (raw_x, raw_y)
+        )
+
+        print(
+            f"Point {len(clicked_view)} | "
+            f"click=({view_x}, {view_y}) | "
+            f"raw=({raw_x}, {raw_y})"
+        )
+
+    cv2.setMouseCallback(
+        WINDOW,
+        mouse_callback
+    )
+
+    print()
+    print("======================================")
+    print("MAP 4-Point Camera Calibration")
+    print("--------------------------------------")
+    print("180도 화면에서 다음 순서로 클릭")
+    print()
+    print("       3 -------- 4")
+    print("       |          |")
+    print("       |   MAP    |")
+    print("       |          |")
+    print("       2 -------- 1")
+    print()
+    print("1 -> 2 -> 3 -> 4")
+    print()
+    print("ENTER : 4점으로 Extrinsic 계산")
+    print("R     : 점 초기화")
+    print("B     : 시작 메뉴로 돌아가기")
+    print("Q     : 종료")
+    print("======================================")
+
+    while True:
+
+        ok, frame = cap.read()
+
+        if not ok:
+            print("카메라 프레임 읽기 실패")
+            return False
+
+        view = get_start_view(frame)
+
+        draw_polygon_and_numbers(
+            view,
+            clicked_view
+        )
+
+        cv2.putText(
+            view,
+            "MAP CALIBRATION : click 1 -> 2 -> 3 -> 4",
+            (25, 38),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 0),
+            2
+        )
+
+        cv2.putText(
+            view,
+            f"Points {len(clicked_view)}/4",
+            (25, 72),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 255),
+            2
+        )
+
+        if candidate is not None:
+
+            cv2.putText(
+                view,
+                (
+                    f"RMSE {candidate['rmse']:.2f}px  "
+                    "ENTER/A: APPLY   R: RETRY"
+                ),
+                (25, 108),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 255, 0),
+                2
+            )
+
+        cv2.imshow(
+            WINDOW,
+            view
+        )
+
+        key = cv2.waitKey(1) & 0xFF
+
+        # ------------------------------------------
+        # 다시 선택
+        # ------------------------------------------
+        if key in (
+            ord("r"),
+            ord("R")
+        ):
+
+            clicked_view.clear()
+            clicked_raw.clear()
+            candidate = None
+
+            print()
+            print("Calibration 점 초기화")
+            continue
+
+        # ------------------------------------------
+        # 시작 메뉴로
+        # ------------------------------------------
+        if key in (
+            ord("b"),
+            ord("B")
+        ):
+
+            cv2.setMouseCallback(
+                WINDOW,
+                lambda *args: None
+            )
+
+            return None
+
+        # ------------------------------------------
+        # 종료
+        # ------------------------------------------
+        if key in (
+            ord("q"),
+            ord("Q"),
+            27
+        ):
+
+            return False
+
+        # ------------------------------------------
+        # 후보가 계산된 상태 -> 적용
+        # ------------------------------------------
+        if (
+            candidate is not None
+            and key in (
+                10,
+                13,
+                ord("a"),
+                ord("A")
+            )
+        ):
+
+            R_camera_to_world = np.array(
+                candidate["R_camera_to_world"],
+                dtype=np.float64
+            )
+
+            camera_position_world = np.array(
+                candidate["camera_position_world"],
+                dtype=np.float64
+            ).reshape(3)
+
+            floor_points = list(
+                candidate["floor_points"]
+            )
+
+            # 새 Extrinsic을 다음 실행의 기본값으로 저장
+            T_world_camera = np.eye(
+                4,
+                dtype=np.float64
+            )
+
+            T_world_camera[:3, :3] = (
+                R_camera_to_world
+            )
+
+            T_world_camera[:3, 3] = (
+                camera_position_world
+            )
+
+            np.savez(
+                "camera_extrinsic.npz",
+                rvec=candidate["rvec"],
+                tvec=candidate["tvec"],
+                R_world_to_camera=(
+                    candidate["R_world_to_camera"]
+                ),
+                R_camera_to_world=(
+                    R_camera_to_world
+                ),
+                camera_position_world=(
+                    camera_position_world.reshape(3, 1)
+                ),
+                T_world_camera=T_world_camera
+            )
+
+            # 클릭 결과도 기록
+            result = {
+                "marker_height_m": MARKER_HEIGHT_M,
+                "reprojection_rmse_px": (
+                    candidate["rmse"]
+                ),
+                "pixel_points_raw": [
+                    [int(x), int(y)]
+                    for x, y in clicked_raw
+                ],
+                "pixel_points_display_1920x1080": [
+                    [int(x), int(y)]
+                    for x, y in clicked_view
+                ],
+                "world_points_m": [
+                    [
+                        float(p[0]),
+                        float(p[1]),
+                        float(p[2])
+                    ]
+                    for p in click_calib_world_points
+                ],
+                "camera_position_world_m": [
+                    float(v)
+                    for v in camera_position_world
+                ],
+                "saved_unix_time": time.time()
+            }
+
+            Path(
+                "camera_map_click_calibration.json"
+            ).write_text(
+                json.dumps(
+                    result,
+                    indent=2
+                )
+            )
+
+            print()
+            print("======================================")
+            print("새 Extrinsic 적용 완료")
+            print("--------------------------------------")
+            print(
+                "camera_extrinsic.npz 저장 완료"
+            )
+            print(
+                "camera_map_click_calibration.json 저장 완료"
+            )
+            print(
+                f"Marker Height = "
+                f"{MARKER_HEIGHT_M*100:.1f} cm"
+            )
+            print("Localization 시작")
+            print("======================================")
+            print()
+
+            cv2.setMouseCallback(
+                WINDOW,
+                lambda *args: None
+            )
+
+            return True
+
+        # ------------------------------------------
+        # 4점 -> 후보 Extrinsic 계산
+        # ------------------------------------------
+        if (
+            candidate is None
+            and key in (
+                10,
+                13
+            )
+        ):
+
+            if len(clicked_raw) != 4:
+
+                print(
+                    "4점을 먼저 선택하세요."
+                )
+                continue
+
+            image_points = np.array(
+                clicked_raw,
+                dtype=np.float64
+            )
+
+            object_points = np.array(
+                click_calib_world_points,
+                dtype=np.float64
+            )
+
+            success, rvec_new, tvec_new = (
+                cv2.solvePnP(
+                    object_points,
+                    image_points,
+                    K,
+                    dist,
+                    flags=cv2.SOLVEPNP_ITERATIVE
+                )
+            )
+
+            if not success:
+
+                print(
+                    "solvePnP 실패 - R로 다시 선택"
+                )
+                continue
+
+            R_world_to_camera_new, _ = (
+                cv2.Rodrigues(
+                    rvec_new
+                )
+            )
+
+            R_camera_to_world_new = (
+                R_world_to_camera_new.T
+            )
+
+            camera_position_world_new = (
+                -R_camera_to_world_new
+                @ tvec_new
+            ).reshape(3)
+
+            projected, _ = cv2.projectPoints(
+                object_points,
+                rvec_new,
+                tvec_new,
+                K,
+                dist
+            )
+
+            projected = (
+                projected.reshape(-1, 2)
+            )
+
+            errors = np.linalg.norm(
+                projected - image_points,
+                axis=1
+            )
+
+            rmse = float(
+                np.sqrt(
+                    np.mean(errors ** 2)
+                )
+            )
+
+            print()
+            print("======================================")
+            print("Candidate Camera Extrinsic")
+            print("--------------------------------------")
+            print(
+                f"X = "
+                f"{camera_position_world_new[0]:.4f} m"
+            )
+            print(
+                f"Y = "
+                f"{camera_position_world_new[1]:.4f} m"
+            )
+            print(
+                f"Z = "
+                f"{camera_position_world_new[2]:.4f} m"
+            )
+            print()
+            print(
+                f"Reprojection RMSE = "
+                f"{rmse:.3f} px"
+            )
+
+            for i, e in enumerate(
+                errors,
+                start=1
+            ):
+
+                print(
+                    f"Point {i}: "
+                    f"{e:.3f} px"
+                )
+
+            if camera_position_world_new[2] >= 0:
+
+                print()
+                print(
+                    "Camera Z 비정상."
+                )
+                print(
+                    "점 순서를 확인하고 R로 다시 선택."
+                )
+                continue
+
+            if rmse > 3.0:
+
+                print()
+                print(
+                    "WARNING: RMSE가 3 px보다 큽니다."
+                )
+                print(
+                    "가능하면 R로 다시 정확히 찍으세요."
+                )
+
+            # 최종 Nav2 직사각형은 별도로 재투영
+            nav2_projected, _ = cv2.projectPoints(
+                drive_world_corners,
+                rvec_new,
+                tvec_new,
+                K,
+                dist
+            )
+
+            nav2_projected = nav2_projected.reshape(
+                -1,
+                2
+            )
+
+            new_floor_points = [
+                (
+                    int(round(x)),
+                    int(round(y))
+                )
+                for x, y in nav2_projected
+            ]
+
+            candidate = {
+                "rvec": rvec_new,
+                "tvec": tvec_new,
+                "R_world_to_camera": (
+                    R_world_to_camera_new
+                ),
+                "R_camera_to_world": (
+                    R_camera_to_world_new
+                ),
+                "camera_position_world": (
+                    camera_position_world_new
+                ),
+                "floor_points": (
+                    new_floor_points
+                ),
+                "rmse": rmse
+            }
+
+            print()
+            print(
+                "ENTER 또는 A : 이 값 적용 후 시작"
+            )
+            print(
+                "R              : 다시 클릭"
+            )
+
+
+def startup_camera_menu():
+
+    make_startup_window()
+
+    while True:
+
+        ok, frame = cap.read()
+
+        if not ok:
+
+            print(
+                "카메라 프레임 읽기 실패"
+            )
+
+            return False
+
+        view = get_start_view(frame)
+
+        # 현재 저장된 Extrinsic 기준 map 표시
+        existing_points = [
+            raw_to_start_view(
+                point[0],
+                point[1]
+            )
+            for point in floor_points
+        ]
+
+        draw_polygon_and_numbers(
+            view,
+            existing_points
+        )
+
+        cv2.putText(
+            view,
+            "CURRENT SAVED CAMERA CALIBRATION",
+            (25, 38),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 0),
+            2
+        )
+
+        cv2.putText(
+            view,
+            "ENTER / E : USE SAVED",
+            (25, 78),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.72,
+            (0, 255, 255),
+            2
+        )
+
+        cv2.putText(
+            view,
+            "C : RECALIBRATE MAP 4 POINTS",
+            (25, 112),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.72,
+            (0, 255, 255),
+            2
+        )
+
+        cv2.putText(
+            view,
+            "Q : QUIT",
+            (25, 146),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.72,
+            (0, 255, 255),
+            2
+        )
+
+        cv2.imshow(
+            WINDOW,
+            view
+        )
+
+        key = cv2.waitKey(1) & 0xFF
+
+        # 기존 저장값 사용
+        if key in (
+            10,
+            13,
+            ord("e"),
+            ord("E")
+        ):
+
+            print()
+            print("======================================")
+            print("기존 Camera Extrinsic 사용")
+            print("--------------------------------------")
+            print(
+                f"X = "
+                f"{camera_position_world[0]:.4f} m"
+            )
+            print(
+                f"Y = "
+                f"{camera_position_world[1]:.4f} m"
+            )
+            print(
+                f"Z = "
+                f"{camera_position_world[2]:.4f} m"
+            )
+            print(
+                f"Marker Height = "
+                f"{MARKER_HEIGHT_M*100:.1f} cm"
+            )
+            print("Localization 시작")
+            print("======================================")
+            print()
+
+            restore_main_window()
+
+            return True
+
+        # 새로 4점 지정
+        if key in (
+            ord("c"),
+            ord("C")
+        ):
+
+            result = (
+                run_map_click_calibration()
+            )
+
+            if result is True:
+
+                restore_main_window()
+
+                return True
+
+            if result is False:
+
+                return False
+
+            # None이면 B를 눌러 메뉴로 돌아온 것
+            continue
+
+        if key in (
+            ord("q"),
+            ord("Q"),
+            27
+        ):
+
+            return False
+
+
+if not startup_camera_menu():
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+    raise SystemExit(
+        "Camera Localization 시작 취소"
+    )
+
 
 fullscreen = False
 last_print_time = 0.0
@@ -323,7 +1194,7 @@ YAW_STD_RAD = math.radians(3.0)
 
 print("======================================")
 print("ArUco Localization : X / Y / Yaw")
-print("Marker height = 16.3 cm")
+print(f"Marker height = {MARKER_HEIGHT_M*100:.1f} cm")
 print("--------------------------------------")
 print("C : 현재 로봇 방향을 Yaw 0도로 설정")
 print("F : 전체화면")
@@ -759,8 +1630,8 @@ while True:
 
             cv2.resizeWindow(
                 WINDOW,
-                1280,
-                720
+                width,
+                height
             )
 
 
